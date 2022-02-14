@@ -1,0 +1,39 @@
+dataset:
+  rand_seed:
+    train: 0
+    test: 1
+  batch_size: 256
+  num_workers: 0
+
+model:
+  name: 'LHFAE'
+  LHFAE:
+    L: 300
+    embL_l: 38
+    embL_h: 75
+    n_enc_h: 1
+    latent_dim_l: 32
+    latent_dim_h: 64
+    hid_dims_l:
+      - 64
+      - 128
+      - 256
+    hid_dims_h:
+      - 64
+      - 128
+
+    lambda_: 1
+    mu: 1
+    nu: 0
+    xi: 0
+
+exp_params:
+  LR: 0.001
+  weight_decay: 0.00001
+  model_save_ep_period: 100
+  knn_acc_record_ep_period: 1
+
+trainer_params:
+  gpus:
+    - 0
+  max_epochs: 300
