@@ -22,10 +22,10 @@ model:
       - 64
       - 128
 
-    lambda_: 1
-    mu: 1
-    nu: 0
-    xi: 0
+    lambda_: 1  # for loss_l
+    mu: 10  # for loss_h
+    nu: 0  # for var_loss
+    xi: 0  # for voc_loss
 
 exp_params:
   LR: 0.001

@@ -34,17 +34,16 @@ class ToyDataset(Dataset):
         seqano_freq = 1.0
         seqano_amp = 0.2
         seqano_len = int(np.floor(ts_len * 0.05))
-        vshifts = np.random.choice([-1., 1.], size=(n_samples,))
+        # vshifts = np.random.choice([-1., 1.], size=(n_samples,))
         sample_prob = 0.01 if kind == 'train' else 1.
         self.seqano_locs1 = np.random.randint(0, ts_len - seqano_len, size=(n_samples,))
         self.seqano_locs2 = np.random.randint(0, ts_len - seqano_len, size=(n_samples,))
 
-        # sample large anomaly loc, amp
+        # sample small and large anomalies loc, amp
         self.lano_locs = np.random.randint(0, ts_len, size=(n_samples, n_anomalies))  # lano: large anomaly
-        lano_amp = np.random.choice([-1, 1], size=(n_samples,))
-
+        lano_amp = np.random.choice([0., 0.], size=(n_samples,))  # np.random.choice([-1, 1], size=(n_samples,))
         self.sano_locs = np.random.randint(0, ts_len, size=(n_samples, n_anomalies))  # sano: small anomaly
-        sano_amp = np.random.choice([-0.5, 0.5], size=(n_samples,))
+        sano_amp = np.random.choice([0., 0.], size=(n_samples,))  # np.random.choice([-0.5, 0.5], size=(n_samples,))
 
         # generate a timeseries dataset
         self.t = np.arange(0, ts_len)
@@ -64,11 +63,9 @@ class ToyDataset(Dataset):
         # add predictable high-freq noise
         for i in range(B):
             t_ = np.arange(self.seqano_locs1[i], self.seqano_locs1[i] + seqano_len)
-            if (kind == 'train' and (np.random.rand() <= sample_prob)) or (kind == 'valid'):
-                self.sines[i, self.seqano_locs1[i]:self.seqano_locs1[i] + seqano_len] = vshifts[i]
-
-            t_ = np.arange(self.seqano_locs2[i], self.seqano_locs2[i] + seqano_len)
             # if (kind == 'train' and (np.random.rand() <= sample_prob)) or (kind == 'valid'):
+            #     self.sines[i, self.seqano_locs1[i]:self.seqano_locs1[i] + seqano_len] = vshifts[i]
+
             self.sines[i, self.seqano_locs2[i]:self.seqano_locs2[i] + seqano_len] += seqano_amp * np.sin(seqano_freq * t_)
 
         # add channel dim

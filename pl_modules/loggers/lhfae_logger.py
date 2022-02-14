@@ -21,8 +21,6 @@ class LHFAELogger(BaseLogger):
             ) -> None:
         assert kind in ['train', 'valid'], 'Type correct `kind`.'
 
-        params = config['exp_params']
-
         mean_outs = {}
         for k in outs[0].keys():
             mean_outs.setdefault(k, 0.)
@@ -30,23 +28,15 @@ class LHFAELogger(BaseLogger):
                 mean_outs[k] += outs[i][k]
             mean_outs[k] /= len(outs)
 
-        # log numerical status
-        log_items = {'epoch': current_epoch,
-                     f'{kind}/loss': mean_outs['loss'],
-                     f'{kind}/loss_l': mean_outs['loss_l'],
-                     f'{kind}/loss_h': mean_outs['loss_h'],
-                     f'{kind}/var_loss': mean_outs['var_loss'],
-                     f'{kind}/cov_loss': mean_outs['cov_loss'],
-                     f'{kind}/sloped_diff_scores_loss': mean_outs['sloped_diff_scores_loss'],
-                     f'{kind}/z_sigma_loss': mean_outs['z_sigma_loss'],
-                     }
+        log_items = {'epoch': current_epoch}
+        log_items_ = {f'{kind}/{k}': v for k, v in mean_outs.items()}
+        log_items = dict(log_items.items() | log_items_.items())
         wandb.log(log_items)
 
         # log recons img
         log_recons_term = 10  # [epoch]
         if (kind == 'valid') and ((current_epoch+1) % log_recons_term == 0):
             x, recons_l, recons_h = track_vars['x'].numpy(), track_vars['recons_l'].numpy(), track_vars['recons_h'].numpy()
-            recons_l_min, recons_l_max = track_vars['recons_l_min'].numpy(), track_vars['recons_l_max'].numpy()
             channel_idx = 0
             sample_idx = 0
             alpha = 0.7
@@ -54,8 +44,6 @@ class LHFAELogger(BaseLogger):
             plt.figure(figsize=(12, 2*3))
             x_ = x[sample_idx, channel_idx, :]
             recons_l_ = recons_l[sample_idx, channel_idx, :]
-            recons_l_min_ = recons_l_min[sample_idx, channel_idx,:]
-            recons_l_max_ = recons_l_max[sample_idx, channel_idx, :]
             recons_h_ = recons_h[sample_idx, channel_idx, :]
             ymin, ymax = np.min(x_), np.max(x_)
             eps = 0.2
@@ -63,8 +51,6 @@ class LHFAELogger(BaseLogger):
             plt.subplot(3, 1, 1)
             plt.plot(x_, label='GT')
             plt.plot(recons_l_, label='LF_recons', alpha=alpha)
-            plt.plot(recons_l_min_, color='grey', linestyle='--')
-            plt.plot(recons_l_max_, color='grey', linestyle='--')
             plt.ylim(ymin - eps, ymax + eps)
             plt.legend()
 
