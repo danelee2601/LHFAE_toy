@@ -18,7 +18,7 @@ def build_datapipeline(config: dict) -> (DataLoader, DataLoader):
                                   )
     test_dataloader = DataLoader(test_dataset,
                                  batch_size=batch_size,
-                                 shuffle=True,
+                                 shuffle=False,
                                  drop_last=False,
                                  num_workers=num_workers,
                                  pin_memory=True if num_workers > 0 else False

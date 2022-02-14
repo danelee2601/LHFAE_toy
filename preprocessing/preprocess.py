@@ -12,6 +12,8 @@ class ToyDataset(Dataset):
                  ts_len: int = 300,
                  n_samples_train: int = 3000,
                  n_samples_test: int = 100,
+                 fseq_freq: float = 1.0,
+                 fseq_amp: float = 0.2,
                  ):
         super().__init__()
         assert kind in ['train', 'valid']
@@ -30,14 +32,14 @@ class ToyDataset(Dataset):
         sine_amps = np.random.uniform(0.1, 1., size=(n_samples, n_sines))
         sine_eps = np.random.uniform(0, 2*np.pi, size=(n_samples, n_sines))
 
-        # sample sequential anomalies
-        seqano_freq = 1.0
-        seqano_amp = 0.2
-        seqano_len = int(np.floor(ts_len * 0.05))
+        # sample fractional sequence(s)
+        # fseq_freq = 1.0
+        # fseq_amp = 0.2
+        fseq_len = int(np.floor(ts_len * 0.05))
         # vshifts = np.random.choice([-1., 1.], size=(n_samples,))
         sample_prob = 0.01 if kind == 'train' else 1.
-        self.seqano_locs1 = np.random.randint(0, ts_len - seqano_len, size=(n_samples,))
-        self.seqano_locs2 = np.random.randint(0, ts_len - seqano_len, size=(n_samples,))
+        self.fseq_locs1 = np.random.randint(0, ts_len - fseq_len, size=(n_samples,))
+        self.fseq_locs2 = np.random.randint(0, ts_len - fseq_len, size=(n_samples,))
 
         # sample small and large anomalies loc, amp
         self.lano_locs = np.random.randint(0, ts_len, size=(n_samples, n_anomalies))  # lano: large anomaly
@@ -60,13 +62,14 @@ class ToyDataset(Dataset):
             self.sines += large_anomalies
             self.sines += small_anomalies
 
-        # add predictable high-freq noise
+        # add fractional sequence(s)
         for i in range(B):
-            t_ = np.arange(self.seqano_locs1[i], self.seqano_locs1[i] + seqano_len)
+            t_ = np.arange(self.fseq_locs1[i], self.fseq_locs1[i] + fseq_len)
             # if (kind == 'train' and (np.random.rand() <= sample_prob)) or (kind == 'valid'):
-            #     self.sines[i, self.seqano_locs1[i]:self.seqano_locs1[i] + seqano_len] = vshifts[i]
+            #     self.sines[i, self.fseq_locs1[i]:self.fseq_locs1[i] + fseq_len] = vshifts[i]
 
-            self.sines[i, self.seqano_locs2[i]:self.seqano_locs2[i] + seqano_len] += seqano_amp * np.sin(seqano_freq * t_)
+            t_ = np.arange(self.fseq_locs2[i], self.fseq_locs2[i] + fseq_len)
+            self.sines[i, self.fseq_locs2[i]:self.fseq_locs2[i] + fseq_len] += fseq_amp * np.sin(fseq_freq * t_)
 
         # add channel dim
         self.sines = self.sines[:, None, :]  # (1, ts_len)
@@ -78,7 +81,7 @@ class ToyDataset(Dataset):
         x = self.sines[idx]
         lano_loc = self.lano_locs[idx]
         sano_loc = self.sano_locs[idx]
-        seqano_loc = self.seqano_locs1[idx]
+        fseq_loc = self.fseq_locs1[idx]
 
         # scale
         pass
@@ -86,7 +89,7 @@ class ToyDataset(Dataset):
         # convert to FloatTensor
         x = torch.from_numpy(x).float()
 
-        return x, (lano_loc, sano_loc, seqano_loc)
+        return x, (lano_loc, sano_loc, fseq_loc)
 
     def __len__(self):
         return self._len
