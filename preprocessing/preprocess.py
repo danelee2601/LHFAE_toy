@@ -11,7 +11,7 @@ class ToyDataset(Dataset):
                  n_anomalies: int = 1,
                  ts_len: int = 300,
                  n_samples_train: int = 3000,
-                 n_samples_test: int = 100,
+                 n_samples_test: int = 500,
                  fseq_freq: float = 1.0,
                  fseq_amp: float = 0.2,
                  ):

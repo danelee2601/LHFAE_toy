@@ -47,17 +47,35 @@ class Reshape(nn.Module):
         return input.view(B, *self.target_shape)
 
 
+class PosEmb(nn.Module):
+    def __init__(self, seq_len: int, dim: int):
+        super(PosEmb, self).__init__()
+        self.pos_emb = self.sinusoidal_embedding(seq_len, dim)
+        self.pos_emb = torch.transpose(self.pos_emb, 1, 2)
+
+    @staticmethod
+    def sinusoidal_embedding(seq_len, dim):
+        pe = torch.FloatTensor([[p / (10000 ** (2 * (i // 2) / dim)) for i in range(dim)]
+                                for p in range(seq_len)])
+        pe[:, 0::2] = torch.sin(pe[:, 0::2])
+        pe[:, 1::2] = torch.cos(pe[:, 1::2])
+        return pe.unsqueeze(0)
+
+    def forward(self, x):
+        return x + self.pos_emb.to(x.device)
+
+
 class LHFAE(nn.Module):
     def __init__(self,
                  L: int,
                  embL_l: int,
                  embL_h: int,
+                 pos_embL: int,
+                 emb_depth: int,
                  in_channels: int = 1,
                  n_enc_h: int = 3,
                  hid_dims_l: tuple = (64, 128, 256),
                  hid_dims_h: tuple = (32, 64, 128),
-                 latent_dim_l: int = 16,
-                 latent_dim_h: int = 16,
                  *args,
                  **kwargs
                  ):
@@ -73,44 +91,44 @@ class LHFAE(nn.Module):
         self.L = L
         self.embL_l = embL_l
         self.embL_h = embL_h
+        self.pos_embL = pos_embL
+        self.emb_depth = emb_depth
         self.in_channels = in_channels
         self.n_enc_h = n_enc_h
-        self.latent_dim_l = latent_dim_l
-        self.latent_dim_h = latent_dim_h
 
-        self.enc_l = self.build_enc(hid_dims_l)
-        self.encs_h = nn.ModuleList([self.build_enc(hid_dims_h) for _ in range(n_enc_h)])
-
-        self.enc_l_output = nn.Linear(hid_dims_l[-1] * embL_l, latent_dim_l)
-        self.encs_h_output = nn.ModuleList([nn.Linear(hid_dims_h[-1] * embL_h, latent_dim_h) for _ in range(n_enc_h)])
-
-        self.dec_l_input = nn.Sequential(nn.Linear(latent_dim_l, hid_dims_l[-1] * embL_l), Reshape((hid_dims_l[-1], embL_l)))
-        self.decs_h_input = nn.ModuleList(
-            [nn.Sequential(nn.Linear(latent_dim_h, hid_dims_h[-1] * embL_h), Reshape((hid_dims_h[-1], embL_h)))
-             for _ in range(n_enc_h)])
+        self.enc_l = self.build_enc(hid_dims_l, add_pos_emb=True)
+        self.encs_h = nn.ModuleList([self.build_enc(hid_dims_h, add_pos_emb=True) for _ in range(n_enc_h)])
 
         rev_hid_dims_l = tuple(list(hid_dims_l)[::-1])
         rev_hid_dims_h = tuple(list(hid_dims_h)[::-1])
         self.dec_l = self.build_dec(rev_hid_dims_l)
         self.decs_h = nn.ModuleList([self.build_dec(rev_hid_dims_h) for _ in range(n_enc_h)])
 
-    def build_enc(self, hid_dims, flatten: bool = True):
+    def build_enc(self, hid_dims, flatten: bool = True, add_pos_emb: bool = False):
         in_channels = self.in_channels
         modules = nn.ModuleList()
-        for h_dim in hid_dims:
+        for i, h_dim in enumerate(hid_dims):
             modules.append(
                 nn.Sequential(
                     nn.Conv1d(in_channels, out_channels=h_dim, kernel_size=3, stride=2, padding=1),
                     nn.BatchNorm1d(h_dim),
-                    nn.GELU())
+                    nn.ReLU())
             )
             in_channels = h_dim
+
+            if add_pos_emb and (i == 0):
+                modules.append(PosEmb(seq_len=self.pos_embL, dim=h_dim))
+
         if flatten:
-            modules.append(nn.Flatten(start_dim=1))
+            modules.append(nn.Sequential(nn.Conv1d(in_channels, self.emb_depth, kernel_size=1, stride=1),)
+                           )
         return nn.Sequential(*modules)
 
     def build_dec(self, rev_hid_dims):
         modules = nn.ModuleList()
+
+        modules.append(nn.ConvTranspose1d(self.emb_depth, rev_hid_dims[0], kernel_size=1, stride=1, ))
+
         for i in range(len(rev_hid_dims) - 1):
             modules.append(
                 nn.Sequential(
@@ -121,7 +139,7 @@ class LHFAE(nn.Module):
                                        padding=1,
                                        output_padding=1),
                     nn.BatchNorm1d(rev_hid_dims[i + 1]),
-                    nn.GELU()
+                    nn.ReLU()
                 )
             )
 
@@ -132,7 +150,7 @@ class LHFAE(nn.Module):
                                                        padding=1,
                                                        output_padding=1),
                                     nn.BatchNorm1d(rev_hid_dims[-1]),
-                                    nn.GELU(),
+                                    nn.ReLU(),
                                     nn.Conv1d(rev_hid_dims[-1], out_channels=1, kernel_size=3, padding=1)
                                     )
         modules.append(final_layer)
@@ -140,18 +158,18 @@ class LHFAE(nn.Module):
         return nn.Sequential(*modules)
 
     def forward(self, x: Tensor) -> Tensor:
-        z_l = self.enc_l_output(self.enc_l(x))
-        recons_l = self.dec_l(self.dec_l_input(z_l))
+        z_l = self.enc_l(x)
+        recons_l = self.dec_l(z_l)
 
         residual = (x - recons_l).clone().detach()  # so that minimizing(diff) only affects high-freq-models.
         recons_h = torch.zeros(*x.shape).float().to(x.device)
         for i in range(self.n_enc_h):
-            z_h = self.encs_h_output[i](self.encs_h[i](residual))
-            recons_h_ = self.decs_h[i](self.decs_h_input[i](z_h))
+            z_h = self.encs_h[i](residual)
+            recons_h_ = self.decs_h[i](z_h)
             recons_h += recons_h_
             residual = residual - recons_h_
 
-        return (recons_l, z_l), (recons_h, ), residual
+        return (recons_l, z_l.squeeze()), (recons_h, ), residual
 
     def loss_function(self,
                       x: Tensor,
@@ -166,15 +184,19 @@ class LHFAE(nn.Module):
         loss_h = F.mse_loss(input=residual, target=torch.zeros(residual.shape).to(residual.device))
 
         # var loss (from vibcreg)
-        var_loss = torch.mean(torch.relu(1. - torch.sqrt(z_l.var(dim=0) + 1e-4)))
+        # var_loss = torch.mean(torch.relu(1. - torch.sqrt(z_l.var(dim=0) + 1e-4)))
+        var_loss = -1
 
         # cov loss (from vibcreg)
-        norm_z_l = (z_l - z_l.mean(dim=0))
-        norm_z_l = F.normalize(norm_z_l, p=2, dim=0)  # (B x D); l2-norm
-        corr_mat_z_l = torch.mm(norm_z_l.T, norm_z_l)  # (D x D)
-        ind = np.diag_indices(corr_mat_z_l.shape[0])
-        corr_mat_z_l[ind[0], ind[1]] = torch.zeros(corr_mat_z_l.shape[0]).to(x.device)
-        cov_loss = (corr_mat_z_l ** 2).mean()
+        if config['model']['LHFAE']['emb_depth'] > 1:
+            # z_l: (B, C, L)
+            norm_z_l = (z_l - z_l.mean(dim=0))
+            norm_z_l = F.normalize(norm_z_l, p=2, dim=2)
+            corr_mat_z_l = torch.bmm(norm_z_l, norm_z_l.transpose(1, 2))  # (B, C, L) x (B, L, C) -> (B, C, C)
+            torch.diagonal(corr_mat_z_l, 0, 1, 2).zero_()  # inplace func
+            cov_loss = (corr_mat_z_l ** 2).mean()
+        else:
+            cov_loss = -1
 
         loss = params['lambda_'] * loss_l \
                + params['mu'] * loss_h \
@@ -197,8 +219,9 @@ if __name__ == '__main__':
 
     # check `embL`
     arbitrary_embL = 10
+    emb_depth = 4
     hid_dims = (64, 128)
-    encoder = LHFAE(L, arbitrary_embL, arbitrary_embL).build_enc(hid_dims, flatten=False)
+    encoder = LHFAE(L, arbitrary_embL, arbitrary_embL, emb_depth).build_enc(hid_dims, flatten=False)
     last_actmap = encoder(x)
     print('last activation map.shape:', last_actmap.shape)
     print('embL:', last_actmap.shape[-1])
