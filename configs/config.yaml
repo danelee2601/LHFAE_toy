@@ -11,9 +11,9 @@ model:
     L: 300
     embL_l: 38
     embL_h: 75
+    pos_embL: 150
     n_enc_h: 1
-    latent_dim_l: 32
-    latent_dim_h: 64
+    emb_depth: 4
     hid_dims_l:
       - 64
       - 128
@@ -24,8 +24,8 @@ model:
 
     lambda_: 1  # for loss_l
     mu: 10  # for loss_h
-    nu: 0  # for var_loss
-    xi: 0  # for voc_loss
+    nu: 1  # for var_loss
+    xi: 1  # for voc_loss
 
 exp_params:
   LR: 0.001
