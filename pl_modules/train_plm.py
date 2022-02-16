@@ -55,11 +55,12 @@ class TrainPLM(pl.LightningModule):
         self.model.train()
 
         x, (lano_loc, sano_loc, seqano_locs) = batch
-        (recons_l, z_l), (recons_h,), residual = self.model(x)
+        (recons_l, z_l), (recons_hs, z_hs), residuals = self.model(x)
         train_loss = self.model.loss_function(x,
                                               recons_l,
                                               z_l,
-                                              residual,
+                                              z_hs,
+                                              residuals,
                                               self.config)
 
         # lr scheduler
@@ -73,15 +74,16 @@ class TrainPLM(pl.LightningModule):
         self.model.eval()
 
         x, (lano_loc, sano_loc, seqano_locs) = batch
-        (recons_l, z_l), (recons_h,), residual = self.model(x)
+        (recons_l, z_l), (recons_hs, z_hs), residuals = self.model(x)
         val_loss = self.model.loss_function(x,
                                             recons_l,
                                             z_l,
-                                            residual,
+                                            z_hs,
+                                            residuals,
                                             self.config)
 
         # get some data for tracking training status
-        self._store_tracking_data(batch_idx, x, recons_l, recons_h)
+        self._store_tracking_data(batch_idx, x, recons_l, recons_hs.sum(dim=0))
 
         self._detach_the_unnecessary(val_loss)
         return val_loss

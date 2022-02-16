@@ -161,27 +161,48 @@ class LHFAE(nn.Module):
         z_l = self.enc_l(x)
         recons_l = self.dec_l(z_l)
 
-        residual = (x - recons_l).clone().detach()  # so that minimizing(diff) only affects high-freq-models.
-        recons_h = torch.zeros(*x.shape).float().to(x.device)
+        residual = (x - recons_l) #.detach()  # so that minimizing(diff) only affects high-freq-models.
+        residuals = torch.zeros((1+self.n_enc_h, *residual.shape)).float().to(x.device)
+        residuals[0] = residual
+        recons_hs = torch.zeros((self.n_enc_h, *x.shape)).float()
+        B = x.shape[0]
+        z_hs = torch.zeros(self.n_enc_h, B, self.emb_depth, self.embL_h).float().to(x.device)
         for i in range(self.n_enc_h):
-            z_h = self.encs_h[i](residual)
+            z_h = self.encs_h[i](residual.detach())
+            z_hs[i] = z_h
             recons_h_ = self.decs_h[i](z_h)
-            recons_h += recons_h_
+            recons_hs[i] = recons_h_.cpu()
             residual = residual - recons_h_
+            # if (i+1) != self.n_enc_h:
+            #     residual = residual.detach()
+            residuals[i+1] = residual
 
-        return (recons_l, z_l.squeeze()), (recons_h, ), residual
+        return (recons_l, z_l.squeeze()), (recons_hs, z_hs), residuals
+
+    def _compute_cov_loss(self, z: Tensor):
+        """
+        :param z:  (B, C, L); temporal representation with the embedding depth
+        """
+        norm_z = (z - z.mean(dim=0))
+        norm_z = F.normalize(norm_z, p=2, dim=2)
+        corr_mat_z = torch.bmm(norm_z, norm_z.transpose(1, 2))  # (B, C, L) x (B, L, C) -> (B, C, C)
+        torch.diagonal(corr_mat_z, 0, 1, 2).zero_()  # inplace func
+        return (corr_mat_z ** 2).mean()
 
     def loss_function(self,
                       x: Tensor,
-                      recons_l,
-                      z_l,
-                      residual: Tensor,
+                      recons_l: Tensor,
+                      z_l: Tensor,
+                      z_hs: Tensor,
+                      residuals: Tensor,
                       config: dict) -> Tensor:
         params = config['model']['LHFAE']
 
         # recons loss
         loss_l = F.l1_loss(input=recons_l, target=x)
-        loss_h = F.mse_loss(input=residual, target=torch.zeros(residual.shape).to(residual.device))
+        loss_h = torch.FloatTensor([0.]).to(x.device)
+        for residual in residuals:
+            loss_h += F.mse_loss(input=residual, target=torch.zeros(residual.shape).to(residual.device))
 
         # var loss (from vibcreg)
         # var_loss = torch.mean(torch.relu(1. - torch.sqrt(z_l.var(dim=0) + 1e-4)))
@@ -190,18 +211,17 @@ class LHFAE(nn.Module):
         # cov loss (from vibcreg)
         if config['model']['LHFAE']['emb_depth'] > 1:
             # z_l: (B, C, L)
-            norm_z_l = (z_l - z_l.mean(dim=0))
-            norm_z_l = F.normalize(norm_z_l, p=2, dim=2)
-            corr_mat_z_l = torch.bmm(norm_z_l, norm_z_l.transpose(1, 2))  # (B, C, L) x (B, L, C) -> (B, C, C)
-            torch.diagonal(corr_mat_z_l, 0, 1, 2).zero_()  # inplace func
-            cov_loss = (corr_mat_z_l ** 2).mean()
+            # z_hs: (n_enc_h, B, C, L)
+            cov_loss_z_l = self._compute_cov_loss(z_l)
+            cov_loss_z_h = torch.sum(torch.Tensor([self._compute_cov_loss(z_hs[i]) for i in range(self.n_enc_h)]))
+            cov_loss = params['xi_l'] * cov_loss_z_l + params['xi_h'] * cov_loss_z_h
         else:
             cov_loss = -1
 
         loss = params['lambda_'] * loss_l \
                + params['mu'] * loss_h \
                + params['nu'] * var_loss \
-               + params['xi'] * cov_loss
+               + cov_loss
 
         return {'loss': loss,
                 'loss_l': loss_l,
