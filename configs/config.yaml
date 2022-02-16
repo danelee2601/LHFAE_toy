@@ -12,7 +12,7 @@ model:
     embL_l: 38
     embL_h: 75
     pos_embL: 150
-    n_enc_h: 1
+    n_enc_h: 2
     emb_depth: 4
     hid_dims_l:
       - 64
@@ -25,7 +25,8 @@ model:
     lambda_: 1  # for loss_l
     mu: 10  # for loss_h
     nu: 1  # for var_loss
-    xi: 1  # for voc_loss
+    xi_l: 1  # for cov_loss_z_l
+    xi_h: 0  # for cov_loss_z_h
 
 exp_params:
   LR: 0.001
