@@ -189,6 +189,13 @@ class LHFAE(nn.Module):
         torch.diagonal(corr_mat_z, 0, 1, 2).zero_()  # inplace func
         return (corr_mat_z ** 2).mean()
 
+    def _compute_var_loss(self, z: Tensor):
+        """
+        :param z:  (B, C, L); temporal representation with the embedding depth
+        """
+        # return torch.mean(torch.relu(1. - torch.sqrt(z_l.var(dim=0) + 1e-4)))
+        return torch.mean((1. - torch.sqrt(z.var(dim=0) + 1e-4)) ** 2)  # to make the feature space "compact"
+
     def loss_function(self,
                       x: Tensor,
                       recons_l: Tensor,
@@ -205,16 +212,20 @@ class LHFAE(nn.Module):
             loss_h += F.mse_loss(input=residual, target=torch.zeros(residual.shape).to(residual.device))
 
         # var loss (from vibcreg)
-        # var_loss = torch.mean(torch.relu(1. - torch.sqrt(z_l.var(dim=0) + 1e-4)))
-        var_loss = -1
+        var_loss_l = self._compute_var_loss(z_l)
+        var_loss_h = torch.FloatTensor([0.]).to(x.device)
+        for z_h in z_hs:
+            var_loss_h += self._compute_var_loss(z_h)
+        var_loss = var_loss_l + var_loss_h
+        # var_loss = -1
 
         # cov loss (from vibcreg)
         if config['model']['LHFAE']['emb_depth'] > 1:
             # z_l: (B, C, L)
             # z_hs: (n_enc_h, B, C, L)
-            cov_loss_z_l = self._compute_cov_loss(z_l)
-            cov_loss_z_h = torch.sum(torch.Tensor([self._compute_cov_loss(z_hs[i]) for i in range(self.n_enc_h)]))
-            cov_loss = params['xi_l'] * cov_loss_z_l + params['xi_h'] * cov_loss_z_h
+            cov_loss_l = self._compute_cov_loss(z_l)
+            cov_loss_h = torch.sum(torch.Tensor([self._compute_cov_loss(z_hs[i]) for i in range(self.n_enc_h)]))
+            cov_loss = params['xi_l'] * cov_loss_l + params['xi_h'] * cov_loss_h
         else:
             cov_loss = -1
 
